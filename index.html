@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Receipts</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Receipts">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#0f766e">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-180.png">
+<style>
+  :root {
+    --bg: #f4f5f4; --card: #ffffff; --ink: #14201e; --muted: #64716f;
+    --line: #dde2e0; --accent: #0f766e; --accent-ink: #ffffff; --danger: #b42318;
+    --chip: #e8efed;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1413; --card: #18211f; --ink: #e8eeec; --muted: #93a19e;
+      --line: #2a3634; --accent: #2bb3a6; --accent-ink: #06211e; --danger: #ff8a7a;
+      --chip: #22302d;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: calc(env(safe-area-inset-top) + 16px) 16px calc(env(safe-area-inset-bottom) + 32px);
+  }
+  main { max-width: 520px; margin: 0 auto; }
+  h1 { font-size: 26px; margin: 4px 0 2px; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); margin: 0 0 20px; font-size: 14px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; margin-bottom: 16px; }
+  .btn {
+    display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%;
+    border: 0; border-radius: 14px; padding: 16px; font: inherit; font-weight: 600;
+    background: var(--accent); color: var(--accent-ink); cursor: pointer; text-align: center;
+  }
+  .btn.big { padding: 26px 16px; font-size: 19px; }
+  .btn.ghost { background: transparent; color: var(--accent); border: 1px solid var(--line); }
+  .btn.plain { background: transparent; color: var(--muted); padding: 10px; font-weight: 500; }
+  .btn:disabled { opacity: .5; }
+  .btn + .btn, label.btn + label.btn { margin-top: 10px; }
+  input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+  label.field { display: block; font-size: 13px; color: var(--muted); margin: 14px 0 6px; }
+  input.in, select.in {
+    width: 100%; font: inherit; font-size: 17px; color: var(--ink); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 12px; padding: 12px; min-height: 48px;
+    -webkit-appearance: none; appearance: none;
+  }
+  input.in:focus, select.in:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .row { display: flex; gap: 10px; }
+  .row > :first-child { flex: 1; min-width: 0; }
+  .row select { width: 96px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .chip { border: 0; background: var(--chip); color: var(--ink); border-radius: 999px; padding: 8px 14px; font: inherit; font-size: 14px; cursor: pointer; }
+  .preview { display: flex; gap: 14px; align-items: center; }
+  .preview img { width: 84px; height: 112px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); }
+  .status { font-size: 14px; color: var(--muted); }
+  .status b { color: var(--ink); display: block; font-size: 16px; margin-bottom: 2px; }
+  .fname { margin: 16px 0; padding: 12px; border-radius: 12px; background: var(--bg); border: 1px dashed var(--line); font: 13px/1.4 ui-monospace, Menlo, Consolas, monospace; word-break: break-all; }
+  .fname span { display: block; font-family: -apple-system, "Segoe UI", sans-serif; color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+  h2 { font-size: 15px; margin: 0 0 10px; display: flex; justify-content: space-between; align-items: center; }
+  h2 button { background: none; border: 0; color: var(--accent); font: inherit; font-size: 14px; font-weight: 500; cursor: pointer; padding: 4px 0; }
+  ul.hist { list-style: none; margin: 0; padding: 0; }
+  ul.hist li { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); font-size: 15px; }
+  ul.hist li:first-child { border-top: 0; }
+  ul.hist small { display: block; color: var(--muted); font-size: 12px; }
+  ul.hist .amt { font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600; }
+  .empty { color: var(--muted); font-size: 14px; margin: 0; }
+  .tip { font-size: 13px; color: var(--muted); margin: 12px 2px 0; }
+  .toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 24px); transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 12px 18px; border-radius: 999px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; text-align: center; }
+  .toast.on { opacity: 1; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Receipts</h1>
+  <p class="sub">Snap a receipt → named PDF → your Expenses folder.</p>
+
+  <!-- Step 1: capture -->
+  <section id="capture">
+    <label class="btn big" for="cam">📷 Take photo of receipt</label>
+    <input id="cam" type="file" accept="image/*" capture="environment">
+    <label class="btn ghost" for="lib">Choose from photos</label>
+    <input id="lib" type="file" accept="image/*">
+    <p class="tip">When saving, pick <b>Save to Files → OneDrive → Desktop → Expenses</b>. iOS remembers the folder after the first time.</p>
+  </section>
+
+  <!-- Step 2: review -->
+  <section id="review" hidden>
+    <div class="card">
+      <div class="preview">
+        <img id="thumb" alt="Receipt preview">
+        <div class="status"><b id="statusTitle">Reading receipt…</b><span id="statusText">Looking for date and total.</span></div>
+      </div>
+
+      <label class="field" for="fDate">Date</label>
+      <input class="in" id="fDate" type="date">
+
+      <label class="field" for="fName">Expense</label>
+      <input class="in" id="fName" type="text" placeholder="e.g. Lunch Kronenhalle" autocomplete="off" autocapitalize="words">
+      <div class="chips" id="chips"></div>
+
+      <label class="field" for="fAmount">Amount</label>
+      <div class="row">
+        <input class="in" id="fAmount" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off">
+        <select class="in" id="fCur"><option>CHF</option><option>EUR</option><option>USD</option><option>GBP</option></select>
+      </div>
+
+      <div class="fname"><span>File name</span><div id="fnamePreview"></div></div>
+
+      <button class="btn" id="saveBtn">Save PDF</button>
+      <button class="btn plain" id="discardBtn">Discard</button>
+    </div>
+  </section>
+
+  <section class="card" id="histCard">
+    <h2>Saved receipts <button id="csvBtn" hidden>Export CSV</button></h2>
+    <ul class="hist" id="hist"></ul>
+    <p class="empty" id="histEmpty">Nothing yet.</p>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const CATEGORIES = ["Lunch", "Dinner", "Coffee", "Taxi", "Train", "Parking", "Fuel", "Hotel", "Flight", "Office"];
+const HIST_KEY = "receipts.history.v1";
+let current = null;      // { dataUrl, w, h }
+let touched = {};        // fields the user edited by hand: never overwrite those with OCR results
+let ocrRun = 0;
+
+/* ---------- helpers ---------- */
+function todayISO() {
+  const d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("on");
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("on"), 3200);
+}
+function parseAmount(s) {
+  if (!s) return null;
+  let v = String(s).replace(/[^\d.,]/g, "");
+  if (!v) return null;
+  const lastSep = Math.max(v.lastIndexOf("."), v.lastIndexOf(","));
+  if (lastSep >= 0 && v.length - lastSep - 1 <= 2) {
+    v = v.slice(0, lastSep).replace(/[.,]/g, "") + "." + v.slice(lastSep + 1);
+  } else {
+    v = v.replace(/[.,]/g, "");
+  }
+  const n = parseFloat(v);
+  return isFinite(n) ? n : null;
+}
+function cleanName(s) {
+  return (s || "").replace(/[\\/:*?"<>|_\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim().replace(/[. ]+$/, "").slice(0, 60);
+}
+function buildFileName(date, name, amount, cur) {
+  const n = cleanName(name).replace(/ /g, "-") || "Expense";
+  const a = amount == null ? "0.00" : amount.toFixed(2);
+  return `${date || todayISO()}_${n}_${cur}-${a}.pdf`;
+}
+
+/* ---------- receipt text parsing ---------- */
+const AMT_RE = /(\d{1,3}(?:['’ ]\d{3})+|\d+)\s?[.,]\s?(\d{2})(?!\d)/g;
+function amountsIn(line) {
+  const out = []; let m; AMT_RE.lastIndex = 0;
+  while ((m = AMT_RE.exec(line))) out.push(parseFloat(m[1].replace(/\D/g, "") + "." + m[2]));
+  return out;
+}
+function parseReceipt(text) {
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const res = { date: null, amount: null, currency: null, merchant: null };
+
+  // Date
+  const validY = y => y >= 2015 && y <= new Date().getFullYear() + 1;
+  const iso = (y, m, d) => (validY(y) && m >= 1 && m <= 12 && d >= 1 && d <= 31)
+    ? `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}` : null;
+  for (const l of lines) {
+    let m = l.match(/\b(\d{1,2})\s?[.\/-]\s?(\d{1,2})\s?[.\/-]\s?(20\d{2}|\d{2})\b/);
+    if (m) { const y = m[3].length === 2 ? 2000 + +m[3] : +m[3]; res.date = iso(y, +m[2], +m[1]); }
+    if (!res.date) { m = l.match(/\b(20\d{2})-(\d{1,2})-(\d{1,2})\b/); if (m) res.date = iso(+m[1], +m[2], +m[3]); }
+    if (res.date) break;
+  }
+
+  // Amount: prefer lines that say "total"; skip tax / cash-given / change lines
+  const TOTAL = /\b(total|summe|gesamt|betrag|zu zahlen|zahlbetrag|endbetrag|montant|totale|importo|amount due|à payer)\b/i;
+  const SKIP = /(mwst|mehrwert|vat|tva|iva|steuer|netto|subtotal|zwischensumme|sous-total|gegeben|erhalten|rückgeld|retour|wechselgeld|change|trinkgeld|tip)/i;
+  let best = null, any = null;
+  lines.forEach((l, i) => {
+    const a = amountsIn(l);
+    if (!SKIP.test(l) && a.length) any = Math.max(any ?? 0, ...a);
+    if (TOTAL.test(l) && !SKIP.test(l)) {
+      let c = a;
+      if (!c.length && lines[i + 1] && !SKIP.test(lines[i + 1])) c = amountsIn(lines[i + 1]); // amount on next line
+      if (c.length) best = Math.max(best ?? 0, c[c.length - 1]);
+    }
+  });
+  res.amount = best ?? any;
+
+  // Currency
+  if (/\b(CHF|SFR|Fr\.)/i.test(text)) res.currency = "CHF";
+  else if (/(€|\bEUR\b)/i.test(text)) res.currency = "EUR";
+  else if (/(£|\bGBP\b)/i.test(text)) res.currency = "GBP";
+  else if (/(\$|\bUSD\b)/i.test(text)) res.currency = "USD";
+
+  // Merchant: first line near the top that looks like a name
+  for (const l of lines.slice(0, 6)) {
+    const letters = (l.match(/[A-Za-zÀ-ÿ]/g) || []).length;
+    if (letters >= 3 && letters / l.length > 0.6 && !/(rechnung|quittung|beleg|receipt|invoice|kassenbon|tel|www|mwst|che-)/i.test(l)) {
+      res.merchant = cleanName(l.replace(/[^A-Za-zÀ-ÿ0-9&' .-]/g, " "))
+        .toLowerCase().replace(/(^|[\s-])([a-zà-ÿ])/g, (m, a, b) => a + b.toUpperCase()).slice(0, 30);
+      break;
+    }
+  }
+  return res;
+}
+
+/* ---------- OCR ---------- */
+let workerPromise = null;
+function getWorker() {
+  if (!workerPromise) {
+    workerPromise = Tesseract.createWorker(["deu", "eng"]).catch(e => { workerPromise = null; throw e; });
+  }
+  return workerPromise;
+}
+async function runOcr(canvas) {
+  const run = ++ocrRun;
+  try {
+    const worker = await getWorker();
+    const { data } = await worker.recognize(canvas);
+    if (run !== ocrRun || !current) return;
+    applyParsed(parseReceipt(data.text || ""));
+  } catch (e) {
+    console.error(e);
+    if (run !== ocrRun) return;
+    $("statusTitle").textContent = "Couldn't read receipt";
+    $("statusText").textContent = "Fill in the details below.";
+  }
+}
+function applyParsed(p) {
+  const found = [];
+  if (p.date && !touched.date) { $("fDate").value = p.date; found.push("date"); }
+  if (p.amount != null && !touched.amount) { $("fAmount").value = p.amount.toFixed(2); found.push("total"); }
+  if (p.currency && !touched.cur) $("fCur").value = p.currency;
+  if (p.merchant && !touched.name) { $("fName").value = p.merchant; found.push("merchant"); }
+  $("statusTitle").textContent = found.length ? "Check the details" : "Couldn't read receipt";
+  $("statusText").textContent = found.length ? "Found " + found.join(", ") + ". Correct anything that's off." : "Fill in the details below.";
+  updateFileName();
+}
+
+/* ---------- image intake ---------- */
+function loadImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Unsupported image")); };
+    img.src = url;
+  });
+}
+async function onFile(file) {
+  if (!file) return;
+  try {
+    const img = await loadImage(file);
+    const MAX = 2000;
+    const scale = Math.min(1, MAX / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement("canvas");
+    c.width = Math.round(img.naturalWidth * scale); c.height = Math.round(img.naturalHeight * scale);
+    const ctx = c.getContext("2d");
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(img, 0, 0, c.width, c.height);
+    startReview(c);
+  } catch (e) {
+    toast("Couldn't open that photo.");
+  }
+}
+function startReview(canvas) {
+  current = { dataUrl: canvas.toDataURL("image/jpeg", 0.82), w: canvas.width, h: canvas.height };
+  touched = {};
+  $("thumb").src = current.dataUrl;
+  $("fDate").value = todayISO(); $("fName").value = ""; $("fAmount").value = "";
+  $("statusTitle").textContent = "Reading receipt…";
+  $("statusText").textContent = "Looking for date and total.";
+  $("capture").hidden = true; $("review").hidden = false;
+  updateFileName();
+  window.scrollTo(0, 0);
+  return runOcr(canvas);
+}
+function resetAll() {
+  ocrRun++; current = null;
+  $("cam").value = ""; $("lib").value = "";
+  $("review").hidden = true; $("capture").hidden = false;
+}
+
+/* ---------- form ---------- */
+function formValues() {
+  return { date: $("fDate").value || todayISO(), name: cleanName($("fName").value), amount: parseAmount($("fAmount").value), cur: $("fCur").value };
+}
+function updateFileName() {
+  const v = formValues();
+  $("fnamePreview").textContent = buildFileName(v.date, v.name, v.amount, v.cur);
+}
+$("fDate").addEventListener("input", () => { touched.date = true; updateFileName(); });
+$("fName").addEventListener("input", () => { touched.name = true; updateFileName(); });
+$("fAmount").addEventListener("input", () => { touched.amount = true; updateFileName(); });
+$("fCur").addEventListener("change", () => { touched.cur = true; updateFileName(); });
+CATEGORIES.forEach(cat => {
+  const b = document.createElement("button");
+  b.type = "button"; b.className = "chip"; b.textContent = cat;
+  b.addEventListener("click", () => {
+    let rest = $("fName").value.trim();
+    for (const c of CATEGORIES) if (rest.toLowerCase().startsWith(c.toLowerCase() + " ") || rest.toLowerCase() === c.toLowerCase()) { rest = rest.slice(c.length).trim(); break; }
+    $("fName").value = (cat + " " + rest).trim();
+    touched.name = true; updateFileName();
+  });
+  $("chips").appendChild(b);
+});
+$("cam").addEventListener("change", e => onFile(e.target.files[0]));
+$("lib").addEventListener("change", e => onFile(e.target.files[0]));
+$("discardBtn").addEventListener("click", resetAll);
+
+/* ---------- PDF + save ---------- */
+function buildPdf(v, fileName) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait", compress: true });
+  const PW = 210, PH = 297, M = 12, HEAD = 10;
+  doc.setProperties({ title: fileName.replace(/\.pdf$/, ""), subject: "Expense receipt", keywords: `${v.date}; ${v.name}; ${v.cur} ${v.amount.toFixed(2)}` });
+  doc.setFontSize(10); doc.setTextColor(60);
+  doc.text(`${v.date}   |   ${v.name}   |   ${v.cur} ${v.amount.toFixed(2)}`, M, M + 3);
+  const boxW = PW - 2 * M, boxH = PH - 2 * M - HEAD;
+  const s = Math.min(boxW / current.w, boxH / current.h);
+  const w = current.w * s, h = current.h * s;
+  doc.addImage(current.dataUrl, "JPEG", (PW - w) / 2, M + HEAD, w, h, undefined, "FAST");
+  return doc.output("blob");
+}
+$("saveBtn").addEventListener("click", async () => {
+  if (!current) return;
+  const v = formValues();
+  if (!v.name) { toast("Add an expense name."); $("fName").focus(); return; }
+  if (v.amount == null || v.amount <= 0) { toast("Add the amount."); $("fAmount").focus(); return; }
+  const fileName = buildFileName(v.date, v.name, v.amount, v.cur);
+  let blob;
+  try { blob = buildPdf(v, fileName); }
+  catch (e) { console.error(e); toast("Couldn't create the PDF."); return; }
+  const file = new File([blob], fileName, { type: "application/pdf" });
+
+  let saved = false;
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file] }); saved = true; }
+    catch (e) { if (e.name !== "AbortError") { console.error(e); downloadBlob(blob, fileName); saved = true; } }
+  } else {
+    downloadBlob(blob, fileName); saved = true;
+  }
+  if (!saved) return; // share sheet cancelled: keep the form so nothing is lost
+  addHistory({ date: v.date, name: v.name, amount: v.amount, cur: v.cur, file: fileName });
+  resetAll();
+  toast("Saved " + fileName);
+});
+function downloadBlob(blob, name) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+
+/* ---------- history ---------- */
+function getHistory() { try { return JSON.parse(localStorage.getItem(HIST_KEY)) || []; } catch { return []; } }
+function addHistory(entry) {
+  const h = getHistory(); h.unshift(entry);
+  try { localStorage.setItem(HIST_KEY, JSON.stringify(h.slice(0, 500))); } catch {}
+  renderHistory();
+}
+function renderHistory() {
+  const h = getHistory(), ul = $("hist");
+  ul.textContent = "";
+  h.slice(0, 15).forEach(e => {
+    const li = document.createElement("li");
+    const left = document.createElement("div"); left.textContent = e.name;
+    const sm = document.createElement("small"); sm.textContent = e.date; left.appendChild(sm);
+    const right = document.createElement("div"); right.className = "amt"; right.textContent = `${e.cur} ${Number(e.amount).toFixed(2)}`;
+    li.append(left, right); ul.appendChild(li);
+  });
+  $("histEmpty").hidden = h.length > 0;
+  $("csvBtn").hidden = h.length === 0;
+}
+$("csvBtn").addEventListener("click", async () => {
+  const q = s => '"' + String(s).replace(/"/g, '""') + '"';
+  const rows = [["Date", "Expense", "Amount", "Currency", "File"].join(";")]
+    .concat(getHistory().map(e => [e.date, q(e.name), Number(e.amount).toFixed(2), e.cur, q(e.file)].join(";")));
+  const blob = new Blob(["﻿" + rows.join("\r\n")], { type: "text/csv" });
+  const name = `Expenses_export_${todayISO()}.csv`;
+  const file = new File([blob], name, { type: "text/csv" });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file] }); } catch (e) { if (e.name !== "AbortError") downloadBlob(blob, name); }
+  } else downloadBlob(blob, name);
+});
+
+renderHistory();
+// Warm up the text recogniser so the first receipt is quick.
+window.addEventListener("load", () => { if (window.Tesseract) getWorker().catch(() => {}); });
+</script>
+</body>
+</html>

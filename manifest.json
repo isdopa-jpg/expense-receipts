@@ -1,0 +1,9 @@
+{
+  "name": "Receipts",
+  "short_name": "Receipts",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#f4f5f4",
+  "theme_color": "#0f766e",
+  "icons": [{ "src": "icon-180.png", "sizes": "180x180", "type": "image/png" }]
+}
