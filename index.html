@@ -126,6 +126,7 @@
       <div class="fname"><span id="destLabel">File name</span><div id="fnamePreview"></div></div>
 
       <button class="btn" id="saveBtn">Save PDF</button>
+      <button class="btn ghost" id="retryOd" hidden>Try OneDrive again</button>
       <button class="btn plain" id="discardBtn">Discard</button>
     </div>
   </section>
@@ -181,8 +182,21 @@ function odRender(note) {
   $("odStatus").textContent = note || (odAccount
     ? `OneDrive connected (${odAccount.username}). Receipts are saved straight to ${ONEDRIVE.folder.replace(/\//g, " › ")}, by company and month.`
     : "Connect OneDrive once to save receipts straight to your Expenses folder.");
-  $("saveBtn").textContent = odAccount ? "Save to OneDrive" : "Save PDF";
+  $("saveBtn").textContent = msalApp ? "Save to OneDrive" : "Save PDF";
 }
+// The app usually stays open in the background on iOS; renew the sign-in quietly whenever it comes back.
+let odRenewing = false;
+async function odRenew() {
+  if (!msalApp || !odAccount || odRenewing) return;
+  odRenewing = true;
+  try { await msalApp.acquireTokenSilent({ scopes: OD_SCOPES, account: odAccount }); }
+  catch (e) {
+    // Only bounce to the sign-in page when no receipt is in progress; otherwise Save handles it.
+    if (e instanceof msal.InteractionRequiredAuthError && !current) msalApp.acquireTokenRedirect({ scopes: OD_SCOPES, account: odAccount });
+  }
+  odRenewing = false;
+}
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") odRenew(); });
 async function odInit() {
   if (!ONEDRIVE.clientId) return;
   try {
@@ -197,7 +211,8 @@ async function odInit() {
     });
     const r = await msalApp.handleRedirectPromise();
     odAccount = (r && r.account) || msalApp.getAllAccounts()[0] || null;
-    if (odAccount) {
+    const pending = !!localStorage.getItem(PENDING_KEY);
+    if (odAccount && !pending) {
       // Sign-ins expire about daily; renew now, before a photo is taken, rather than at save time.
       try { await msalApp.acquireTokenSilent({ scopes: OD_SCOPES, account: odAccount }); }
       catch (e) {
@@ -537,8 +552,11 @@ $("saveBtn").addEventListener("click", async () => {
   catch (e) { console.error(e); toast("Couldn't create the PDF."); return; }
   const file = new File([blob], fileName, { type: "application/pdf" });
 
-  if (msalApp && odAccount && !forceShare) {
-    const btn = $("saveBtn"); btn.disabled = true; btn.textContent = "Saving…";
+  await odReady; // never fall back to the share sheet just because sign-in is still loading
+  if (msalApp && !forceShare) {
+    const btn = $("saveBtn");
+    if (!odAccount) { stashPending(); toast("Signing in to OneDrive…"); msalApp.loginRedirect({ scopes: OD_SCOPES }); return; }
+    btn.disabled = true; btn.textContent = "Saving…";
     try {
       const dest = destFolder(v.date);
       const savedName = await odUpload(blob, fileName, dest);
@@ -547,12 +565,20 @@ $("saveBtn").addEventListener("click", async () => {
       toast("Saved to " + dest.replace("/", " › ") + ": " + savedName);
     } catch (e) {
       console.error(e);
-      forceShare = true; // next tap uses the share sheet so the receipt isn't lost
-      toast("OneDrive upload failed. Tap Save again to share the PDF manually.");
+      if (e instanceof msal.InteractionRequiredAuthError) {
+        // The OneDrive sign-in has expired: renew it and come back to this receipt.
+        stashPending(); toast("Renewing OneDrive sign-in…");
+        msalApp.acquireTokenRedirect({ scopes: OD_SCOPES, account: odAccount });
+        return;
+      }
+      forceShare = true; // next tap only: share sheet, so the receipt isn't lost
+      toast("OneDrive upload failed (" + (e.message || e) + "). Tap again to try once more, or use the share sheet.");
     }
-    btn.disabled = false; btn.textContent = forceShare ? "Save PDF" : "Save to OneDrive";
+    btn.disabled = false; btn.textContent = forceShare ? "Share PDF instead" : "Save to OneDrive";
+    $("retryOd").hidden = !forceShare;
     return;
   }
+  forceShare = false; $("retryOd").hidden = true; // the fallback applies to one save only
 
   let saved = false;
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -566,6 +592,28 @@ $("saveBtn").addEventListener("click", async () => {
   resetAll();
   toast("Saved " + fileName);
 });
+$("retryOd").addEventListener("click", () => { forceShare = false; $("retryOd").hidden = true; $("saveBtn").textContent = "Save to OneDrive"; $("saveBtn").click(); });
+
+/* A receipt in progress survives the trip to the Microsoft sign-in page and back. */
+const PENDING_KEY = "receipts.pending.v1";
+function stashPending() {
+  if (!current) return;
+  try {
+    localStorage.setItem(PENDING_KEY, JSON.stringify({ img: current, date: $("fDate").value, name: $("fName").value, amount: $("fAmount").value, cur: $("fCur").value, at: Date.now() }));
+  } catch (e) { console.error(e); }
+}
+function restorePending() {
+  let p = null;
+  try { p = JSON.parse(localStorage.getItem(PENDING_KEY)); localStorage.removeItem(PENDING_KEY); } catch {}
+  if (!p || !p.img || Date.now() - p.at > 15 * 60 * 1000) return;
+  current = p.img; touched = { date: true, name: true, amount: true, cur: true };
+  $("thumb").src = current.dataUrl;
+  $("fDate").value = p.date; $("fName").value = p.name; $("fAmount").value = p.amount; $("fCur").value = p.cur;
+  $("statusTitle").textContent = "Ready to save";
+  $("statusText").textContent = odAccount ? "OneDrive is connected. Tap Save to OneDrive." : "OneDrive sign-in didn't complete. Tap Save to try again.";
+  $("capture").hidden = true; $("review").hidden = false;
+  updateFileName();
+}
 function downloadBlob(blob, name) {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob); a.download = name;
@@ -627,7 +675,7 @@ $("aiRemove").addEventListener("click", () => {
 });
 renderHistory();
 aiRender();
-odInit();
+const odReady = odInit().then(restorePending, restorePending);
 // Warm up the on-device text recogniser when it is the one in use.
 window.addEventListener("load", () => { if (window.Tesseract && !aiKey()) getWorker().catch(() => {}); });
 </script>
