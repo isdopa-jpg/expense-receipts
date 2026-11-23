@@ -146,7 +146,7 @@ let ocrRun = 0;
 /* ---------- OneDrive (direct upload) ----------
    Fill in clientId + tenantId from the Microsoft Entra app registration.
    While clientId is empty the app uses the iOS share sheet instead. */
-const ONEDRIVE = { clientId: "", tenantId: "", folder: "Desktop/Expenses" };
+const ONEDRIVE = { clientId: "859774cb-5ffa-4480-82fc-15db9e8c93ad", tenantId: "1e9cc1f4-870c-454d-a147-bb10407de282", folder: "Desktop/Expenses" };
 const OD_SCOPES = ["Files.ReadWrite"];
 let msalApp = null, odAccount = null, forceShare = false;
 
