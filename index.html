@@ -89,7 +89,11 @@
     <input id="cam" type="file" accept="image/*" capture="environment">
     <label class="btn ghost" for="lib">Choose from photos</label>
     <input id="lib" type="file" accept="image/*">
-    <p class="tip">When saving, pick <b>Save to Files → OneDrive → Desktop → Expenses</b>. iOS remembers the folder after the first time.</p>
+    <p class="tip" id="tipShare">When saving, pick <b>Save to Files → OneDrive → Desktop → Expenses</b>. iOS remembers the folder after the first time.</p>
+    <div id="odBox" hidden>
+      <p class="tip" id="odStatus"></p>
+      <button class="btn ghost" id="odConnect" hidden>Connect OneDrive</button>
+    </div>
   </section>
 
   <!-- Step 2: review -->
@@ -138,6 +142,61 @@ const HIST_KEY = "receipts.history.v1";
 let current = null;      // { dataUrl, w, h }
 let touched = {};        // fields the user edited by hand: never overwrite those with OCR results
 let ocrRun = 0;
+
+/* ---------- OneDrive (direct upload) ----------
+   Fill in clientId + tenantId from the Microsoft Entra app registration.
+   While clientId is empty the app uses the iOS share sheet instead. */
+const ONEDRIVE = { clientId: "", tenantId: "", folder: "Desktop/Expenses" };
+const OD_SCOPES = ["Files.ReadWrite"];
+let msalApp = null, odAccount = null, forceShare = false;
+
+function loadScript(src) {
+  return new Promise((res, rej) => { const s = document.createElement("script"); s.src = src; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
+}
+function odRender(note) {
+  $("odBox").hidden = false; $("tipShare").hidden = !!odAccount;
+  $("odConnect").hidden = !!odAccount;
+  $("odStatus").textContent = note || (odAccount
+    ? `OneDrive connected (${odAccount.username}). Receipts are saved straight to ${ONEDRIVE.folder.replace(/\//g, " › ")}.`
+    : "Connect OneDrive once to save receipts straight to your Expenses folder.");
+  $("saveBtn").textContent = odAccount ? "Save to OneDrive" : "Save PDF";
+}
+async function odInit() {
+  if (!ONEDRIVE.clientId) return;
+  try {
+    await loadScript("https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/lib/msal-browser.min.js");
+    msalApp = new msal.PublicClientApplication({
+      auth: {
+        clientId: ONEDRIVE.clientId,
+        authority: "https://login.microsoftonline.com/" + (ONEDRIVE.tenantId || "organizations"),
+        redirectUri: location.origin + location.pathname.replace(/index\.html$/, "")
+      },
+      cache: { cacheLocation: "localStorage" }
+    });
+    const r = await msalApp.handleRedirectPromise();
+    odAccount = (r && r.account) || msalApp.getAllAccounts()[0] || null;
+    if (odAccount) {
+      // Sign-ins expire about daily; renew now, before a photo is taken, rather than at save time.
+      try { await msalApp.acquireTokenSilent({ scopes: OD_SCOPES, account: odAccount }); }
+      catch (e) {
+        if (e instanceof msal.InteractionRequiredAuthError) return msalApp.acquireTokenRedirect({ scopes: OD_SCOPES, account: odAccount });
+      }
+    }
+    odRender();
+  } catch (e) {
+    console.error(e);
+    odRender("OneDrive sign-in failed: " + (e.errorMessage || e.message || e));
+  }
+}
+async function odUpload(blob, fileName) {
+  const { accessToken } = await msalApp.acquireTokenSilent({ scopes: OD_SCOPES, account: odAccount });
+  const path = ONEDRIVE.folder.split("/").concat(fileName).map(encodeURIComponent).join("/");
+  const resp = await fetch(`https://graph.microsoft.com/v1.0/me/drive/root:/${path}:/content?@microsoft.graph.conflictBehavior=rename`, {
+    method: "PUT", headers: { Authorization: "Bearer " + accessToken, "Content-Type": "application/pdf" }, body: blob
+  });
+  if (!resp.ok) throw new Error("OneDrive upload failed (" + resp.status + ")");
+  return (await resp.json()).name;
+}
 
 /* ---------- helpers ---------- */
 function todayISO() {
@@ -354,6 +413,22 @@ $("saveBtn").addEventListener("click", async () => {
   catch (e) { console.error(e); toast("Couldn't create the PDF."); return; }
   const file = new File([blob], fileName, { type: "application/pdf" });
 
+  if (msalApp && odAccount && !forceShare) {
+    const btn = $("saveBtn"); btn.disabled = true; btn.textContent = "Saving…";
+    try {
+      const savedName = await odUpload(blob, fileName);
+      addHistory({ date: v.date, name: v.name, amount: v.amount, cur: v.cur, file: savedName });
+      resetAll();
+      toast("Saved to OneDrive: " + savedName);
+    } catch (e) {
+      console.error(e);
+      forceShare = true; // next tap uses the share sheet so the receipt isn't lost
+      toast("OneDrive upload failed. Tap Save again to share the PDF manually.");
+    }
+    btn.disabled = false; btn.textContent = forceShare ? "Save PDF" : "Save to OneDrive";
+    return;
+  }
+
   let saved = false;
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
     try { await navigator.share({ files: [file] }); saved = true; }
@@ -405,7 +480,9 @@ $("csvBtn").addEventListener("click", async () => {
   } else downloadBlob(blob, name);
 });
 
+$("odConnect").addEventListener("click", () => { if (msalApp) msalApp.loginRedirect({ scopes: OD_SCOPES }); });
 renderHistory();
+odInit();
 // Warm up the text recogniser so the first receipt is quick.
 window.addEventListener("load", () => { if (window.Tesseract) getWorker().catch(() => {}); });
 </script>
