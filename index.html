@@ -129,6 +129,17 @@
     <ul class="hist" id="hist"></ul>
     <p class="empty" id="histEmpty">Nothing yet.</p>
   </section>
+
+  <section class="card">
+    <h2>AI reading <button id="aiToggle">Set up</button></h2>
+    <p class="empty" id="aiStatus"></p>
+    <div id="aiForm" hidden>
+      <label class="field" for="aiKeyIn">Anthropic API key</label>
+      <input class="in" id="aiKeyIn" type="password" placeholder="sk-ant-…" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <button class="btn" id="aiSave" style="margin-top:12px">Save key</button>
+      <button class="btn plain" id="aiRemove">Remove key</button>
+    </div>
+  </section>
 </main>
 <div class="toast" id="toast"></div>
 
@@ -284,6 +295,80 @@ function parseReceipt(text) {
   return res;
 }
 
+/* ---------- AI reading (Claude) ----------
+   The API key is typed in on the phone and kept only in this browser's storage. */
+const AI_KEY = "receipts.aiKey.v1";
+const AI_MODEL = "claude-opus-5-5";
+const aiKey = () => { try { return localStorage.getItem(AI_KEY) || ""; } catch { return ""; } };
+const AI_SCHEMA = {
+  type: "object", additionalProperties: false,
+  required: ["date", "amount", "currency", "merchant", "category"],
+  properties: {
+    date: { type: ["string", "null"], description: "Date of purchase as YYYY-MM-DD" },
+    amount: { type: ["number", "null"], description: "Final total actually paid, including tax and tip" },
+    currency: { type: ["string", "null"], description: "ISO code: CHF, EUR, USD or GBP" },
+    merchant: { type: ["string", "null"], description: "Short merchant name, e.g. 'Kronenhalle', without legal form or address" },
+    category: { type: ["string", "null"], description: "One of: " + CATEGORIES.join(", ") + ", or null if none fits" }
+  }
+};
+function aiImage(canvas) {
+  const MAX = 1568, s = Math.min(1, MAX / Math.max(canvas.width, canvas.height));
+  const c = document.createElement("canvas");
+  c.width = Math.round(canvas.width * s); c.height = Math.round(canvas.height * s);
+  c.getContext("2d").drawImage(canvas, 0, 0, c.width, c.height);
+  return c.toDataURL("image/jpeg", 0.85).split(",")[1];
+}
+async function aiCall(body, extraHeaders) {
+  const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: Object.assign({
+      "content-type": "application/json", "x-api-key": aiKey(),
+      "anthropic-version": "2026-10-21", "anthropic-dangerous-direct-browser-access": "true"
+    }, extraHeaders),
+    body: JSON.stringify(body)
+  });
+  const json = await resp.json().catch(() => ({}));
+  if (!resp.ok) { const e = new Error((json.error && json.error.message) || ("HTTP " + resp.status)); e.status = resp.status; throw e; }
+  return json;
+}
+async function aiRead(canvas) {
+  const base = {
+    model: AI_MODEL, max_tokens: 4000,
+    messages: [{ role: "user", content: [
+      { type: "image", source: { type: "base64", media_type: "image/jpeg", data: aiImage(canvas) } },
+      { type: "text", text:
+        "This is a photo of an expense receipt, most likely from Switzerland (German, French, Italian or English). " +
+        "Extract the purchase date, the final total actually paid (including tax and tip; not a subtotal, not the VAT amount, not cash given or change), " +
+        "the currency, a short merchant name, and the best-fitting category (for restaurants use the time of day on the receipt: Lunch before 15:00, Dinner after 17:00). " +
+        "Dates on Swiss receipts are day.month.year. Today is " + todayISO() + ". Use null for anything you cannot read with confidence. " +
+        "Reply with only a JSON object with the keys date (YYYY-MM-DD), amount (number), currency, merchant, category." }
+    ] }]
+  };
+  let msg;
+  try {
+    msg = await aiCall(Object.assign({}, base, {
+      output_config: { effort: "low", format: { type: "json_schema", schema: AI_SCHEMA } },
+      fallbacks: "default"
+    }), { "anthropic-beta": "server-side-fallback-2026-07-01" });
+  } catch (e) {
+    if (e.status !== 400) throw e;
+    msg = await aiCall(base); // plain request if an optional setting was rejected
+  }
+  if (msg.stop_reason === "refusal") throw new Error("The AI declined to read this image");
+  const text = (msg.content || []).filter(b => b.type === "text").map(b => b.text).join("");
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) throw new Error("Unexpected AI answer");
+  const r = JSON.parse(m[0]);
+  const cat = CATEGORIES.find(c => c.toLowerCase() === String(r.category || "").toLowerCase());
+  const merchant = cleanName(r.merchant || "").slice(0, 30);
+  return {
+    date: /^\d{4}-\d{2}-\d{2}$/.test(r.date || "") ? r.date : null,
+    amount: typeof r.amount === "number" && r.amount > 0 ? r.amount : null,
+    currency: ["CHF", "EUR", "USD", "GBP"].includes(r.currency) ? r.currency : null,
+    merchant: [cat, merchant].filter(Boolean).join(" ") || null
+  };
+}
+
 /* ---------- OCR ---------- */
 let workerPromise = null;
 function getWorker() {
@@ -294,11 +379,26 @@ function getWorker() {
 }
 async function runOcr(canvas) {
   const run = ++ocrRun;
+  let aiNote = "";
+  if (aiKey()) {
+    try {
+      const p = await aiRead(canvas);
+      if (run !== ocrRun || !current) return;
+      applyParsed(p);
+      return;
+    } catch (e) {
+      console.error(e);
+      if (run !== ocrRun || !current) return;
+      aiNote = "AI reading failed (" + (e.message || e) + "), used basic reading. ";
+      $("statusText").textContent = aiNote;
+    }
+  }
   try {
     const worker = await getWorker();
     const { data } = await worker.recognize(canvas);
     if (run !== ocrRun || !current) return;
     applyParsed(parseReceipt(data.text || ""));
+    if (aiNote) $("statusText").textContent = aiNote + $("statusText").textContent;
   } catch (e) {
     console.error(e);
     if (run !== ocrRun) return;
@@ -481,10 +581,30 @@ $("csvBtn").addEventListener("click", async () => {
 });
 
 $("odConnect").addEventListener("click", () => { if (msalApp) msalApp.loginRedirect({ scopes: OD_SCOPES }); });
+function aiRender() {
+  const on = !!aiKey();
+  $("aiStatus").textContent = on
+    ? "On. Receipts are read by Claude; the photo is sent to Anthropic for that. The key is stored only on this device."
+    : "Off. Receipts are read on the device, which is less accurate. Add an Anthropic API key to turn on AI reading.";
+  $("aiToggle").textContent = on ? "Change" : "Set up";
+  $("aiRemove").hidden = !on;
+}
+$("aiToggle").addEventListener("click", () => { $("aiForm").hidden = !$("aiForm").hidden; });
+$("aiSave").addEventListener("click", () => {
+  const k = $("aiKeyIn").value.trim();
+  if (!k) { toast("Paste your API key first."); return; }
+  try { localStorage.setItem(AI_KEY, k); } catch { toast("Couldn't store the key on this device."); return; }
+  $("aiKeyIn").value = ""; $("aiForm").hidden = true; aiRender(); toast("AI reading is on.");
+});
+$("aiRemove").addEventListener("click", () => {
+  try { localStorage.removeItem(AI_KEY); } catch {}
+  $("aiForm").hidden = true; aiRender(); toast("AI reading is off.");
+});
 renderHistory();
+aiRender();
 odInit();
-// Warm up the text recogniser so the first receipt is quick.
-window.addEventListener("load", () => { if (window.Tesseract) getWorker().catch(() => {}); });
+// Warm up the on-device text recogniser when it is the one in use.
+window.addEventListener("load", () => { if (window.Tesseract && !aiKey()) getWorker().catch(() => {}); });
 </script>
 </body>
 </html>
